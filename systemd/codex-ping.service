@@ -1,0 +1,19 @@
+[Unit]
+Description=Schedule minimal Codex pings from the server reset time
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/python3 %h/.local/lib/codex-ping/scheduler.py
+WorkingDirectory=%h/.local/state/codex-ping/work
+UMask=0077
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=30
+TimeoutStopSec=20
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

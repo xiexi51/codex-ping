@@ -1,0 +1,5 @@
+{
+  "model": "gpt-6-luna",
+  "prompt": "Reply OK.",
+  "timeout_seconds": 120
+}

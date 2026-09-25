@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.codex/
+auth.json
+*.log
+schedule.json
+settings.local.json
+.env
+.env.*
+runtime/
+dist/

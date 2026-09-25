@@ -1,0 +1,29 @@
+#!/bin/bash
+set -euo pipefail
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+case "${1:-status}" in
+  status)
+    systemctl --user show codex-ping.service -p ActiveState -p SubState -p UnitFileState -p MainPID
+    /usr/bin/python3 "$HOME/.local/lib/codex-ping/scheduler.py" status
+    ;;
+  logs) touch "$HOME/.local/state/codex-ping/summary.log"; exec tail -n 36 -F "$HOME/.local/state/codex-ping/summary.log" ;;
+  start) systemctl --user enable --now codex-ping.service ;;
+  stop) systemctl --user disable --now codex-ping.service ;;
+  restart) systemctl --user enable codex-ping.service; systemctl --user restart codex-ping.service ;;
+  run)
+    systemctl --user start codex-ping.service
+    systemctl --user kill --kill-who=main --signal=SIGUSR1 codex-ping.service
+    echo '已请求立即 ping；完成两分钟后查询重置时间并重新安排。用 codex-ping logs 查看结果。'
+    ;;
+  uninstall)
+    "$0" stop
+    systemctl --user reset-failed codex-ping.service 2>/dev/null || true
+    rm -f "$HOME/.config/systemd/user/codex-ping.service"
+    systemctl --user daemon-reload
+    rm -rf -- "$HOME/.local/lib/codex-ping" "$HOME/.config/codex-ping" "$HOME/.local/state/codex-ping"
+    rm -f -- "$HOME/.local/bin/codex-ping"
+    echo 'Task, configuration, scripts and private logs removed. Shared journal and account-wide linger setting retained.'
+    ;;
+  *) echo 'Usage: codex-ping {status|logs|start|stop|restart|run|uninstall}' >&2; exit 2 ;;
+esac
