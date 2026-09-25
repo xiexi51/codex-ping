@@ -93,3 +93,7 @@ bash -n install.sh bin/codex-ping
 测试使用模拟时间与响应，不调用模型。覆盖动态调度、重启恢复、旧时间去重和查询失败重试。
 
 接口参考：[Codex App Server](https://learn.chatgpt.com/docs/app-server)。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。
