@@ -72,6 +72,7 @@ class SchedulerTests(unittest.TestCase):
                  patch.object(s.time, 'time', side_effect=lambda: clock[0]), \
                  patch.object(s.limits, 'read_limits', side_effect=read), \
                  patch.object(s.limits, 'next_reset', side_effect=lambda value: value), \
+                 patch.object(s.run, 'environment', return_value={}), \
                  patch.object(s.run, 'ping', side_effect=ping), patch.object(s.run, 'log'), \
                  patch.object(s.display, 'ping'), patch.object(s.display, 'checked'), \
                  patch.object(s.display, 'append'):

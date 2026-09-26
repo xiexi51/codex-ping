@@ -1,11 +1,12 @@
 """Read the server reset time without starting a model turn."""
 import json
-import os
 from pathlib import Path
-import selectors
-import signal
+import queue
 import subprocess
+import threading
 import time
+
+from platform_support import CODEX, process_options, terminate_tree
 
 ROOT = Path.home()
 STATE = ROOT / '.local/state/codex-ping'
@@ -14,43 +15,63 @@ TIMEOUT_SECONDS = 15
 
 def read_limits(environment):
     """One short-lived stdio connection, with a deadline covering both RPCs."""
-    command = [str(ROOT / '.local/lib/codex-ping/codex'),
+    command = [str(CODEX),
                '--disable', 'apps', '--disable', 'plugins', '--disable', 'hooks',
                'app-server', '--listen', 'stdio://']
     process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL, env=environment,
-                               cwd=STATE / 'work', start_new_session=True)
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
-    buffer = b''
+                               cwd=STATE / 'work', **process_options())
+    messages = queue.Queue(maxsize=64)
+    finished = threading.Event()
     deadline = time.monotonic() + TIMEOUT_SECONDS
+
+    def enqueue(item):
+        while not finished.is_set():
+            try:
+                messages.put(item, timeout=0.1)
+                return
+            except queue.Full:
+                pass
+
+    def reader():
+        try:
+            while not finished.is_set():
+                line = process.stdout.readline(4 * 1024 * 1024 + 1)
+                if not line:
+                    enqueue(RuntimeError('rate-limit app-server closed before responding'))
+                    return
+                if len(line) > 4 * 1024 * 1024:
+                    enqueue(RuntimeError('rate-limit response exceeds size bound'))
+                    return
+                if line.strip():
+                    enqueue(json.loads(line))
+        except Exception as error:
+            enqueue(error)
+
+    # Windows selectors cannot wait on anonymous subprocess pipes.
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
 
     def send(message):
         process.stdin.write((json.dumps(message) + '\n').encode())
         process.stdin.flush()
 
     def receive(request_id):
-        nonlocal buffer
         while True:
-            while b'\n' in buffer:
-                line, buffer = buffer.split(b'\n', 1)
-                if not line.strip():
-                    continue
-                message = json.loads(line)
-                if message.get('id') == request_id:
-                    if 'error' in message:
-                        # Record only the error code, never authentication payloads.
-                        raise RuntimeError(f"rate-limit RPC error code={message['error'].get('code')}")
-                    return message['result']
             remaining = deadline - time.monotonic()
-            if remaining <= 0 or not selector.select(remaining):
+            if remaining <= 0:
                 raise TimeoutError('rate-limit query exceeded 15 seconds')
-            chunk = os.read(process.stdout.fileno(), 65536)
-            if not chunk:
-                raise RuntimeError('rate-limit app-server closed before responding')
-            buffer += chunk
-            if len(buffer) > 4 * 1024 * 1024:
-                raise RuntimeError('rate-limit response exceeds size bound')
+            try:
+                message = messages.get(timeout=remaining)
+            except queue.Empty:
+                raise TimeoutError('rate-limit query exceeded 15 seconds') from None
+            if isinstance(message, Exception):
+                raise message
+            if message.get('id') == request_id:
+                if 'error' in message:
+                    # Never record authentication payloads.
+                    raise RuntimeError(f"rate-limit RPC error code={message['error'].get('code')}")
+                return message['result']
 
     try:
         send({'id': 1, 'method': 'initialize', 'params': {
@@ -60,16 +81,9 @@ def read_limits(environment):
         send({'id': 2, 'method': 'account/rateLimits/read', 'params': {}})
         return receive(2)
     finally:
-        selector.close()
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait(timeout=1)
+        finished.set()
+        terminate_tree(process)
+        thread.join(timeout=2)
         process.stdin.close()
         process.stdout.close()
 

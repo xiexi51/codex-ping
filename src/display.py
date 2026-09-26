@@ -6,7 +6,7 @@ STATE = Path.home() / '.local/state/codex-ping'
 
 
 def date(epoch):
-    return datetime.datetime.fromtimestamp(epoch).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z (%z)')
+    return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z (%z)')
 
 
 def duration(seconds):
@@ -18,7 +18,7 @@ def duration(seconds):
 
 
 def append(text):
-    with (STATE / 'summary.log').open('a') as output:
+    with (STATE / 'summary.log').open('a', encoding='utf-8') as output:
         output.write(text + '\n')
 
 

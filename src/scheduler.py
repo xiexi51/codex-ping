@@ -1,5 +1,4 @@
-"""Persistent reset -> +60s ping -> +120s query loop, owned by systemd."""
-import fcntl
+"""Persistent reset -> +60s ping -> +120s query loop on Linux and Windows."""
 import json
 import os
 from pathlib import Path
@@ -13,6 +12,7 @@ import time
 import display
 import limits
 import run
+from platform_support import WINDOWS, lock_file
 
 STATE = Path.home() / '.local/state/codex-ping'
 STATE_FILE = STATE / 'schedule.json'
@@ -24,7 +24,7 @@ RETRY_SECONDS = 60
 def save(state):
     fd, name = tempfile.mkstemp(prefix='schedule.', dir=STATE)
     try:
-        with os.fdopen(fd, 'w') as output:
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
             json.dump(state, output, ensure_ascii=False, indent=2)
             output.write('\n')
             output.flush()
@@ -38,7 +38,7 @@ def save(state):
 def load():
     if not STATE_FILE.exists():
         return {}
-    return json.loads(STATE_FILE.read_text())
+    return json.loads(STATE_FILE.read_text(encoding='utf-8'))
 
 
 def plan(reset, now, last_consumed_reset):
@@ -68,6 +68,8 @@ class Wakeup:
     def __init__(self):
         self.stopping = False
         self.manual = False
+        if WINDOWS:
+            return
         self.read_fd, self.write_fd = os.pipe2(os.O_NONBLOCK | os.O_CLOEXEC)
         signal.set_wakeup_fd(self.write_fd)
         signal.signal(signal.SIGTERM, self.stop)
@@ -81,6 +83,27 @@ class Wakeup:
         self.manual = True
 
     def wait(self, seconds):
+        if WINDOWS:
+            deadline = time.monotonic() + max(0, seconds)
+            while True:
+                if (STATE / 'stop.request').exists():
+                    self.stopping = True
+                    return
+                try:
+                    (STATE / 'run.request').unlink()
+                    self.manual = True
+                    return
+                except FileNotFoundError:
+                    pass
+                except PermissionError:
+                    # The Windows manager may still have the request open.
+                    # Leave it in place and consume it on the next poll.
+                    pass
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                time.sleep(min(0.25, remaining))
+            return
         if select.select([self.read_fd], [], [], max(0, seconds))[0]:
             try:
                 while os.read(self.read_fd, 4096):
@@ -89,12 +112,16 @@ class Wakeup:
                 pass
 
     def close(self):
+        if WINDOWS:
+            return
         signal.set_wakeup_fd(-1)
         os.close(self.read_fd)
         os.close(self.write_fd)
 
 
 def notify_ready():
+    if WINDOWS:
+        return
     address = os.environ.get('NOTIFY_SOCKET')
     if address:
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as client:
@@ -106,15 +133,21 @@ def serve():
     os.umask(0o077)
     STATE.mkdir(parents=True, exist_ok=True)
     with (STATE / 'scheduler.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file(lock)
         wakeup = Wakeup()
         state = load()
         recover(state, time.time())
         save(state)
+        if WINDOWS:
+            (STATE / 'scheduler.pid').write_text(str(os.getpid()), encoding='ascii')
         notify_ready()
         run.log('SCHEDULER_START reset+60s -> ping -> wait120s -> query')
         try:
             while not wakeup.stopping:
+                if WINDOWS:
+                    wakeup.wait(0)
+                    if wakeup.stopping:
+                        break
                 now = time.time()
                 manual = wakeup.manual
                 wakeup.manual = False
@@ -158,6 +191,8 @@ def serve():
         finally:
             run.log('SCHEDULER_STOP schedule retained for restart')
             wakeup.close()
+            if WINDOWS:
+                (STATE / 'scheduler.pid').unlink(missing_ok=True)
 
 
 def status():
@@ -178,4 +213,11 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'status':
         status()
     else:
-        serve()
+        try:
+            serve()
+        except Exception:
+            import traceback
+            STATE.mkdir(parents=True, exist_ok=True)
+            with (STATE / 'scheduler-error.log').open('a', encoding='utf-8') as output:
+                traceback.print_exc(file=output)
+            raise

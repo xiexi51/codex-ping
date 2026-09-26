@@ -3,8 +3,10 @@ import datetime
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
+import sys
+
+from platform_support import CODEX, WINDOWS, process_options, terminate_tree
 
 ROOT = Path.home()
 STATE = ROOT / '.local/state/codex-ping'
@@ -12,6 +14,15 @@ CONFIG = ROOT / '.config/codex-ping'
 
 
 def environment():
+    if WINDOWS:
+        names = ('SystemRoot', 'WINDIR', 'COMSPEC', 'PATH', 'PATHEXT',
+                 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA',
+                 'PROGRAMDATA', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')
+        env = {name: os.environ[name] for name in names if name in os.environ}
+        runtime = json.loads((CONFIG / 'runtime.json').read_text(encoding='utf-8-sig'))
+        env.update(HOME=str(ROOT), CODEX_HOME=runtime['codex_home'],
+                   PYTHONIOENCODING='utf-8')
+        return env
     return {'HOME': str(ROOT), 'USER': ROOT.name, 'LOGNAME': ROOT.name,
             'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
             'CODEX_HOME': str(ROOT / '.codex')}
@@ -20,16 +31,17 @@ def environment():
 def log(message):
     stamp = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
     line = f'{stamp} {message}'
-    with (STATE / 'run.log').open('a') as output:
+    with (STATE / 'run.log').open('a', encoding='utf-8') as output:
         output.write(line + '\n')
-    print(line, flush=True)
+    if sys.stdout is not None:
+        print(line, flush=True)
 
 
 def ping():
     process = None
     try:
-        settings = json.loads((CONFIG / 'settings.json').read_text())
-        command = [str(ROOT / '.local/lib/codex-ping/codex'), 'exec',
+        settings = json.loads((CONFIG / 'settings.json').read_text(encoding='utf-8-sig'))
+        command = [str(CODEX), 'exec',
                    '--ignore-user-config', '--ignore-rules', '--ephemeral',
                    '--skip-git-repo-check', '--sandbox', 'read-only',
                    '--color', 'never', '--json', '--cd', str(STATE / 'work'),
@@ -52,7 +64,8 @@ def ping():
         log('PING_START model=' + settings['model'] + ' prompt=' + json.dumps(settings['prompt']))
         process = subprocess.Popen(command, env=environment(), stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   text=True, start_new_session=True)
+                                   text=True, encoding='utf-8', errors='replace',
+                                   **process_options())
         output, _ = process.communicate(timeout=settings['timeout_seconds'])
         completed = False
         for line in output.splitlines():
@@ -67,7 +80,7 @@ def ping():
         return success
     except Exception as error:
         if process is not None and process.poll() is None:
-            os.killpg(process.pid, signal.SIGKILL)
+            terminate_tree(process)
             process.communicate()
         log('PING_FAILURE ' + str(error))
         return False

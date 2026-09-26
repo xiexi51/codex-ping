@@ -1,6 +1,7 @@
 # codex-ping
 
-在 Linux 服务器上，按 Codex 的重置时间自动发送轻量 ping。断开 SSH、重启服务器后持续运行。
+在 Linux 或 Windows 11 上，按 Codex 的重置时间自动发送轻量 ping。
+Linux 使用 systemd；Windows 在后台运行，并支持当前用户登录后自动启动。
 
 ## 工作原理
 
@@ -10,6 +11,34 @@
 4. 按新的重置时间安排下一次，循环执行。
 
 ## 安装
+
+### Windows 11
+
+需要 Python 3.8+（含 `pythonw.exe`）和已登录的原生 `codex.exe`。在 PowerShell 中执行：
+
+```powershell
+git clone https://github.com/xiexi51/codex-ping.git
+cd codex-ping
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Start
+& "$HOME\.local\bin\codex-ping.cmd" run
+```
+
+找不到 Python 或 Codex 时，安装参数可指定 `-PythonBin C:\路径\python.exe`
+和 `-CodexBin C:\路径\codex.exe`。详细说明见 [Windows 11 安装与管理](docs/windows.md)。
+
+```powershell
+& "$HOME\.local\bin\codex-ping.cmd" status
+& "$HOME\.local\bin\codex-ping.cmd" logs
+& "$HOME\.local\bin\codex-ping.cmd" stop
+& "$HOME\.local\bin\codex-ping.cmd" start
+& "$HOME\.local\bin\codex-ping.cmd" restart
+& "$HOME\.local\bin\codex-ping.cmd" uninstall
+```
+
+Windows 关闭终端或锁屏后继续运行；重启后需要登录当前用户才会启动。
+注销、关机或睡眠期间不会发送 ping。
+
+### Linux
 
 需要 Linux、systemd 用户服务、Python 3.8+，以及已登录的 Codex CLI。
 安装前请确认 [CLI 兼容性](https://github.com/xiexi51/codex-ping/blob/main/docs/usage.md#安装要求)。

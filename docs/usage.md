@@ -2,6 +2,8 @@
 
 [返回 README](../README.md)
 
+本文介绍 Linux 安装；Windows 11 请看 [Windows 安装与管理](windows.md)。
+
 ## 安装要求
 
 - Linux、systemd 用户服务、Python 3.8+。

@@ -50,7 +50,7 @@ fi
 
 install -d -m 700 "$task_lib" "$task_config" "$task_state" "$task_state/work"
 install -d "$HOME/.local/bin" "$HOME/.config/systemd/user"
-for name in scheduler.py run.py limits.py display.py; do
+for name in scheduler.py run.py limits.py display.py platform_support.py; do
   install -m 600 "$source_dir/src/$name" "$task_lib/$name"
 done
 install -m 700 "$source_dir/bin/codex-ping" "$HOME/.local/bin/codex-ping"
